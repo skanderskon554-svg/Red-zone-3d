@@ -27,17 +27,19 @@ jobs:
           test -f "$TEMPLATE_DIR/android_debug.apk"
           test -d /usr/lib/jvm/java-17-openjdk-amd64
           test -d /usr/lib/android-sdk/platform-tools
-          if [ ! -f /root/debug.keystore ]; then
-            keytool -genkeypair -v -keystore /root/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          DEBUG_KEYSTORE="$HOME/red-zone-debug.keystore"
+          rm -f "$DEBUG_KEYSTORE"
+          keytool -genkeypair -v -keystore "$DEBUG_KEYSTORE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           mkdir -p "$HOME/.config/godot"
-          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<'EOF'
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
 
           [resource]
           export/android/java_sdk_path = "/usr/lib/jvm/java-17-openjdk-amd64"
           export/android/android_sdk_path = "/usr/lib/android-sdk"
-          export/android/debug_keystore = "/root/debug.keystore"
+          export/android/debug_keystore = "$DEBUG_KEYSTORE"
           export/android/debug_keystore_user = "androiddebugkey"
           export/android/debug_keystore_pass = "android"
           EOF
@@ -47,6 +49,9 @@ jobs:
 
       - name: Export Android debug APK
         run: godot --headless --verbose --export-debug "Android" build/RED-ZONE-3D.apk
+
+      - name: Verify APK
+        run: test -s build/RED-ZONE-3D.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
