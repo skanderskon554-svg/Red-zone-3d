@@ -35,10 +35,29 @@ jobs:
           cp -a /tmp/godot-templates/templates/. "$TEMPLATE_DIR/"
           test -f "$TEMPLATE_DIR/web_release.zip"
 
-      - name: Export Web build
+      - name: Export versioned Web build
+        shell: bash
         run: |
+          set -euxo pipefail
           mkdir -p build/web
-          godot --headless --path . --verbose --export-release "Web" build/web/index.html
+          BUILD_ID="${GITHUB_SHA::7}"
+          GAME_FILE="redzone-${BUILD_ID}.html"
+          godot --headless --path . --verbose --export-release "Web" "build/web/${GAME_FILE}"
+          cat > build/web/index.html <<EOF
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <meta http-equiv="refresh" content="0;url=./${GAME_FILE}">
+            <title>RED ZONE 3D</title>
+          </head>
+          <body style="margin:0;background:#111;color:#fff;font:16px sans-serif">
+            <p>Loading RED ZONE 3D…</p>
+            <script>location.replace("./${GAME_FILE}");</script>
+          </body>
+          </html>
+          EOF
 
       - name: Verify web files
         run: |
