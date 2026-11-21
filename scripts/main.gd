@@ -3,6 +3,8 @@ extends Node3D
 var player: CharacterBody3D
 var camera: Camera3D
 var enemies: Array[CharacterBody3D] = []
+var enemy_attack_cooldowns: Dictionary = {}
+var material_cache: Dictionary = {}
 var health := 100
 var ammo := 30
 var score := 0
@@ -35,10 +37,14 @@ func _ready() -> void:
 		_spawn_enemy()
 
 func _material(color: Color, roughness := 0.88, metallic := 0.0) -> StandardMaterial3D:
+	var key := "%s_%.2f_%.2f" % [color.to_html(), roughness, metallic]
+	if material_cache.has(key):
+		return material_cache[key]
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.roughness = roughness
 	mat.metallic = metallic
+	material_cache[key] = mat
 	return mat
 
 func _part(parent: Node3D, part_name: String, mesh_data: Mesh, pos: Vector3, color: Color, rot := Vector3.ZERO) -> MeshInstance3D:
@@ -356,51 +362,83 @@ func _physics_process(delta: float) -> void:
 				enemy.look_at(Vector3(player.global_position.x, enemy.global_position.y, player.global_position.z))
 			else:
 				enemy.velocity = Vector3.ZERO
-				if randf() < delta * 0.3:
+				var enemy_id := enemy.get_instance_id()
+				var cooldown: float = maxf(0.0, float(enemy_attack_cooldowns.get(enemy_id, 0.0)) - delta)
+				if cooldown <= 0.0 and health > 0:
 					health = max(0, health - 5)
+					cooldown = 1.5
 					_update_hud()
+				enemy_attack_cooldowns[enemy_id] = cooldown
 			enemy.move_and_slide()
 
 func _spawn_enemy() -> void:
 	var enemy := CharacterBody3D.new()
 	enemy.name = "Enemy_Soldier"
+	enemy.add_to_group("enemies")
 	enemy.position = Vector3(randf_range(-17,17), 1, randf_range(-17,5))
 	var collision := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
-	capsule.radius = 0.38
-	capsule.height = 1.8
+	capsule.radius = 0.36
+	capsule.height = 1.85
 	collision.shape = capsule
 	enemy.add_child(collision)
 
 	var soldier := Node3D.new()
 	soldier.name = "Soldier_Model"
 	enemy.add_child(soldier)
-	# Boots and legs
-	_cube(soldier, "Left boot", Vector3(-0.19,0.12,0.02), Vector3(0.22,0.22,0.34), RIFLE_DARK)
-	_cube(soldier, "Right boot", Vector3(0.19,0.12,0.02), Vector3(0.22,0.22,0.34), RIFLE_DARK)
-	_cube(soldier, "Left trouser leg", Vector3(-0.19,0.48,0), Vector3(0.23,0.62,0.27), OLIVE)
-	_cube(soldier, "Right trouser leg", Vector3(0.19,0.48,0), Vector3(0.23,0.62,0.27), OLIVE)
-	# Torso, armored vest, shoulders and arms
-	_cube(soldier, "Uniform torso", Vector3(0,1.15,0), Vector3(0.72,0.72,0.38), OLIVE)
-	_cube(soldier, "Tactical vest", Vector3(0,1.17,-0.205), Vector3(0.58,0.53,0.10), TAN)
-	_cube(soldier, "Vest magazine pouch", Vector3(-0.17,1.12,-0.27), Vector3(0.12,0.19,0.07), RIFLE_DARK)
-	_cube(soldier, "Vest radio pouch", Vector3(0.17,1.12,-0.27), Vector3(0.12,0.19,0.07), RIFLE_DARK)
-	_cube(soldier, "Left shoulder", Vector3(-0.47,1.38,0), Vector3(0.25,0.28,0.30), OLIVE_LIGHT)
-	_cube(soldier, "Right shoulder", Vector3(0.47,1.38,0), Vector3(0.25,0.28,0.30), OLIVE_LIGHT)
-	_cube(soldier, "Left arm", Vector3(-0.49,1.02,-0.02), Vector3(0.20,0.55,0.22), OLIVE)
-	_cube(soldier, "Right arm", Vector3(0.49,1.02,-0.02), Vector3(0.20,0.55,0.22), OLIVE)
-	# Head, helmet and dark visor
+	# Smooth capsule-based body parts replace the old block-shaped mannequin.
+	var torso := CapsuleMesh.new()
+	torso.radius = 0.31
+	torso.height = 0.82
+	_part(soldier, "Combat uniform", torso, Vector3(0,1.18,0), OLIVE)
+	var vest := CapsuleMesh.new()
+	vest.radius = 0.265
+	vest.height = 0.62
+	_part(soldier, "Armoured vest", vest, Vector3(0,1.2,-0.035), Color(0.30,0.32,0.24))
+	for x in [-0.16, 0.0, 0.16]:
+		_cube(soldier, "Vest pouch", Vector3(x,1.12,-0.27), Vector3(0.105,0.16,0.07), TAN)
+	# Rounded upper and lower legs with knee pads and boots.
+	for side in [-1.0, 1.0]:
+		var leg := CapsuleMesh.new()
+		leg.radius = 0.115
+		leg.height = 0.66
+		_part(soldier, "Combat trousers", leg, Vector3(side*0.17,0.48,0), OLIVE)
+		var knee := SphereMesh.new()
+		knee.radius = 0.13
+		knee.height = 0.13
+		_part(soldier, "Knee pad", knee, Vector3(side*0.17,0.43,-0.07), RIFLE_DARK)
+		_cube(soldier, "Combat boot", Vector3(side*0.17,0.11,-0.045), Vector3(0.22,0.20,0.34), RIFLE_DARK)
+	# Bent-looking arms, shoulder pads and gloves.
+	for side in [-1.0, 1.0]:
+		var upper_arm := CapsuleMesh.new()
+		upper_arm.radius = 0.105
+		upper_arm.height = 0.48
+		_part(soldier, "Sleeved arm", upper_arm, Vector3(side*0.39,1.13,-0.015), OLIVE_LIGHT, Vector3(0,0,side*12))
+		var glove := SphereMesh.new()
+		glove.radius = 0.115
+		glove.height = 0.16
+		_part(soldier, "Glove", glove, Vector3(side*0.40,0.82,-0.04), RIFLE_DARK)
+	# Head, neck and rounded combat helmet.
+	var neck := CylinderMesh.new()
+	neck.top_radius = 0.09
+	neck.bottom_radius = 0.10
+	neck.height = 0.16
+	_part(soldier, "Neck", neck, Vector3(0,1.62,0), Color(0.34,0.27,0.20))
 	var head := SphereMesh.new()
-	head.radius = 0.20
-	head.height = 0.4
-	_part(soldier, "Soldier head", head, Vector3(0,1.68,0), Color(0.55,0.39,0.27))
+	head.radius = 0.17
+	head.height = 0.34
+	_part(soldier, "Head", head, Vector3(0,1.76,0), Color(0.43,0.33,0.25))
 	var helmet := SphereMesh.new()
-	helmet.radius = 0.24
-	helmet.height = 0.23
-	_part(soldier, "Combat helmet", helmet, Vector3(0,1.84,0), OLIVE_LIGHT)
-	_cube(soldier, "Face visor", Vector3(0,1.69,-0.17), Vector3(0.23,0.09,0.055), RIFLE_DARK)
+	helmet.radius = 0.205
+	helmet.height = 0.22
+	_part(soldier, "Combat helmet", helmet, Vector3(0,1.91,0.01), Color(0.16,0.21,0.14))
+	var visor := SphereMesh.new()
+	visor.radius = 0.11
+	visor.height = 0.075
+	_part(soldier, "Dark eye protection", visor, Vector3(0,1.78,-0.13), RIFLE_DARK)
 	add_child(enemy)
 	enemies.append(enemy)
+	enemy_attack_cooldowns[enemy.get_instance_id()] = 0.0
 
 func _shoot() -> void:
 	if ammo <= 0:
@@ -419,15 +457,30 @@ func _shoot() -> void:
 		tween.tween_property(weapon_root, "position:z", -0.53, 0.045)
 		tween.tween_property(weapon_root, "position:z", -0.62, 0.09)
 
-	var query := PhysicsRayQueryParameters3D.create(camera.global_position, camera.global_position - camera.global_transform.basis.z * 90.0)
+	# Raycast from the exact centre of the camera; resolve enemy groups robustly.
+	var origin := camera.global_position
+	var direction := -camera.global_transform.basis.z
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + direction * 100.0)
 	query.exclude = [player.get_rid()]
+	query.collide_with_areas = true
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if hit and hit.collider in enemies:
-		var target: CharacterBody3D = hit.collider
-		enemies.erase(target)
-		target.queue_free()
-		score += 1
-		_spawn_enemy()
+	if not hit.is_empty():
+		var collider := hit.get("collider") as Node
+		var target: CharacterBody3D = null
+		if collider is CharacterBody3D and collider.is_in_group("enemies"):
+			target = collider as CharacterBody3D
+		elif collider != null:
+			var ancestor := collider.get_parent()
+			while ancestor != null and not ancestor is CharacterBody3D:
+				ancestor = ancestor.get_parent()
+			if ancestor is CharacterBody3D and ancestor.is_in_group("enemies"):
+				target = ancestor as CharacterBody3D
+		if is_instance_valid(target):
+			enemies.erase(target)
+			enemy_attack_cooldowns.erase(target.get_instance_id())
+			target.queue_free()
+			score += 1
+			_spawn_enemy()
 	_update_hud()
 
 func _reload() -> void:
